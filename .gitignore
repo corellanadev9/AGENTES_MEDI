@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+functions/script/keys/firebase-sa.json
+functions/script/keys/firebase-sa-staging.json
+functions/script/keys/firebase-sa-prod.json
