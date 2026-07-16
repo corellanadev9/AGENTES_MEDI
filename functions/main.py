@@ -7,6 +7,9 @@ from firebase_admin import credentials, initialize_app
 from firebase_functions import https_fn
 
 from agentBaseMediprocesos.service import handle_request_payload as agent_base_handler
+from proveedores.providerSyncHomologador.service import (
+    handle_request_payload as provider_sync_homologador_handler,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -97,6 +100,7 @@ def example_agent_router(req: https_fn.Request) -> https_fn.Response:
 
     handlers = {
         "agentBaseMediprocesos": agent_base_handler,
+        "providerSyncHomologador": provider_sync_homologador_handler,
     }
 
     if agent_name not in handlers:
@@ -123,6 +127,37 @@ def example_agent_router(req: https_fn.Request) -> https_fn.Response:
             {
                 "ok": False,
                 "agent": agent_name,
+                "error": str(exc),
+            },
+            status=500,
+        )
+
+
+@https_fn.on_request()
+def provider_sync_homologador_api(req: https_fn.Request) -> https_fn.Response:
+    if req.method != "POST":
+        return json_response(
+            {
+                "ok": False,
+                "error": "Method not allowed. Usa POST.",
+            },
+            status=405,
+        )
+
+    try:
+        payload = req.get_json(silent=True) or {}
+        result = provider_sync_homologador_handler(payload)
+        return json_response(
+            {
+                "ok": True,
+                "agent": "providerSyncHomologador",
+                "result": result,
+            }
+        )
+    except Exception as exc:
+        return json_response(
+            {
+                "ok": False,
                 "error": str(exc),
             },
             status=500,
