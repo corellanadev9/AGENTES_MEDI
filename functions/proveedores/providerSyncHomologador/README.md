@@ -1,61 +1,229 @@
 # providerSyncHomologador
 
-Agente para Provider Sync que recibe un archivo Excel o CSV con catalogos de servicios de proveedores y devuelve un JSON homologado.
+Agente HTTP de Firebase para homologar catalogos de laboratorios y diagnostico de
+ProviderSync/LabSync.
 
-## Objetivo
+## Flujo
 
-Este agente analiza filas con servicios de laboratorio, radiologia, hospitalarios y similares para proponer:
+1. ProviderSync extrae las filas de un Excel, CSV o TXT.
+2. Envia las filas, el catalogo vigente de `CPT_PRODUCT` y el catalogo `SERVICE_TYPE`.
+3. El agente recupera candidatos del catalogo interno y del archivo
+   `CODIGO MEDICAL FEES.xlsx`.
+4. Ejecuta una primera homologacion sin cargar el PDF.
+5. Solo las filas sin asociacion o con confianza menor a `80` se procesan nuevamente
+   con candidatos de `MEDICAL-FEES-DATA.pdf`.
+6. El modelo decide la asociacion y el Tipo de Servicio usando unicamente candidatos
+   verificados.
+7. La respuesta conserva una fila por registro y agrega fuente, categoria, confianza
+   y revision humana.
 
-- codigo Medical FIIS principal,
-- nombre estandar internacional del servicio,
-- codigos candidatos alternos,
-- observaciones y nivel de confianza,
-- marcas de revision humana cuando exista ambiguedad.
+La prioridad es:
 
-El agente puede apoyarse en busqueda web para validar sinonimos, nombres tecnicos y clasificaciones.
+1. `catalogo_cpt`
+2. `medical_fees` desde Excel
+3. `medical_fees` desde PDF, solo como fallback
+4. `sin_coincidencia`
 
-## Ubicacion
+## Endpoint
 
-- Carpeta: `functions/proveedores/providerSyncHomologador`
+Firebase Function:
 
-## Formatos de entrada soportados
-
-- `rows`: lista JSON de filas.
-- `filePath`: ruta local a `.xlsx`, `.xlsm`, `.csv` o `.tsv`.
-- `excelBase64`: archivo codificado en base64.
-- `csvText`: texto CSV.
-
-## Formato esperado por fila
-
-```csv
-"tipoServicio","codigoServicio","nombreServicio","moneda","precio","tipoProveedor","codigoProveedor","nombreProveedor"
-2,"852201",FACTOR V DE LEYDEN,1,1473.21,6,127,TECNODIAGNOSIS
-2,"80164",ACIDO VALPROICO/ANTIASMATICO,1,160.71,2,657,CENTRO MEDICO BETHESDA
-2,"84703",SEROLOGIA HCG,1,44.64,2,644,HOSPITAL MONTE CRISTO
-2,"86695",HERPES SIMPLE IGM,1,106.03,2,644,HOSPITAL MONTE CRISTO
+```text
+provider_sync_homologador_api
 ```
 
-## Respuesta
+Metodo: `POST`
 
-Devuelve un JSON con:
+## Entrada
 
-- metadatos del procesamiento,
-- lista `items` homologados por fila,
-- `resumen` agregado.
+```json
+{
+  "fileName": "precios_raiza.xlsx",
+  "rows": [
+    {
+      "rowNumber": 2,
+      "precio": "Q200,00",
+      "fechaInicio": "03/10/2025",
+      "observaciones": "",
+      "codigoServicio": "13.04.13",
+      "nombreServicio": "MAXILAR INFERIOR O SUPERIOR",
+      "codigoProveedor": "RAIZA",
+      "nombreProveedor": "RAIZA"
+    }
+  ],
+  "catalogoCpt": [
+    {
+      "idCptProduct": 99,
+      "codigoCpt": "70100",
+      "nombreCpt": "RAYOS X DE MANDIBULA, MENOS DE 4 VISTAS",
+      "tipoProcedimientoId": 4,
+      "tipoProcedimientoNombre": "Radiologia",
+      "estado": 1
+    }
+  ],
+  "catalogoTiposServicio": [
+    {
+      "idTipoServicio": 7,
+      "nombreTipoServicio": "Rayos X",
+      "abreviatura": "RX"
+    }
+  ],
+  "batchSize": 15,
+  "maxCandidates": 5,
+  "enableWebSearch": false
+}
+```
 
-## Ejemplo de uso local
+Tambien se aceptan `filePath`, `excelBase64` y `csvText` para pruebas o integraciones
+alternas. Los formatos soportados son `.xlsx`, `.xlsm`, `.csv`, `.tsv` y `.txt`.
+
+El catalogo `catalogoTiposServicio` acepta tanto el contrato del API
+(`idTipoServicio`, `nombreTipoServicio`) como las columnas directas de base de datos
+(`ID_SERVICE_TYPE`, `DESCRIPTION`).
+
+Encabezados reconocidos incluyen:
+
+- `PRECIO NEGOCIADO`
+- `FECHA DE INICIO`
+- `OBSERVACIONES`
+- `CODIGO ASIGNADO RAIZA`
+- `NOMBRE ASIGNADO RAIZA`
+- `CODIGO PROCEDIMIENTO`
+- `NOMBRE PROCEDIMIENTO`
+
+## Respuesta por fila
+
+```json
+{
+  "rowNumber": 2,
+  "codigoServicio": "13.04.13",
+  "nombreServicioOriginal": "MAXILAR INFERIOR O SUPERIOR",
+  "precio": "Q200,00",
+  "fechaInicio": "03/10/2025",
+  "estadoAsociacion": "asociado",
+  "fuenteAsociacion": "catalogo_cpt",
+  "idCptProduct": 99,
+  "codigoCpt": "70100",
+  "nombreCpt": "RAYOS X DE MANDIBULA, MENOS DE 4 VISTAS",
+  "nombreCptOriginal": "Radiologic examination, mandible; partial, less than 4 views",
+  "codigoMedicalFees": "70100",
+  "categoria": "RX",
+  "tipoServicioId": 7,
+  "tipoServicioNombre": "Rayos X",
+  "confianzaPorcentaje": 93,
+  "confianza": "alta",
+  "requiereRevisionHumana": false,
+  "motivo": "Coinciden anatomia y alcance radiologico.",
+  "codigosCandidatos": []
+}
+```
+
+Valores de `estadoAsociacion`:
+
+- `asociado`: existe en el catalogo CPT recibido.
+- `cpt_nuevo_sugerido`: existe en Medical Fees, pero no en el catalogo actual.
+- `sin_asociacion`: no hay evidencia suficiente.
+
+`itemsParaRevision` cuenta exclusivamente registros con `confianzaPorcentaje`
+menor a `80`. Cuando la fuente es `medical_fees`, `nombreCptOriginal` conserva el
+texto verificado. Si el codigo proviene del Excel, `categoria` contiene el nombre
+exacto de la pestaña y `paginaMedicalFees` es nulo. Si proviene del PDF,
+`categoria` es nulo, `paginaMedicalFees` contiene la pagina y `nombreCpt` incluye
+la traduccion al espanol.
+
+Dentro de `codigosCandidatos`, los candidatos de `medical_fees` utilizan `nombre`
+para la traduccion al espanol y `nombreOriginal` para el texto exacto del libro.
+
+## Excel Medical Fees
+
+La ruta por defecto se resuelve en este orden:
+
+```text
+functions/proveedores/providerSyncHomologador/CODIGO_MEDICAL_FEES.xlsx
+functions/proveedores/providerSyncHomologador/CODIGO MEDICAL FEES.xlsx
+```
+
+El Excel se indexa una vez por instancia de Firebase. Cada pestaña se conserva
+como `categoria`. Se puede cambiar la ruta con `MEDICAL_FEES_EXCEL_PATH`.
+
+## PDF Medical Fees
+
+La ruta por defecto es:
+
+```text
+functions/proveedores/providerSyncHomologador/MEDICAL-FEES-DATA.pdf
+```
+
+El PDF se carga e indexa de forma diferida, solo si alguna fila queda sin asociacion
+o con confianza menor a `80` despues de la primera pasada con el Excel. El indice
+se mantiene en memoria y su ruta se puede cambiar con `MEDICAL_FEES_PDF_PATH`.
+
+## Variables
+
+```text
+OPENAI_API_KEY
+PROVIDER_SYNC_HOMOLOGADOR_MODEL
+MEDICAL_FEES_PDF_PATH
+MEDICAL_FEES_EXCEL_PATH
+```
+
+`PROVIDER_SYNC_HOMOLOGADOR_MODEL` es opcional.
+
+Para desarrollo local se puede crear `functions/.secret.local` usando
+`functions/.secret.local.example` como referencia. El archivo real esta ignorado
+por Git y tambien es utilizado por el emulador de Firebase.
+
+Para produccion, registra la llave en Firebase Secret Manager:
 
 ```bash
-cd /Users/desarrollomp/Documents/MEDIPROCESOS-PRO/AGENTES_MEDI/functions/proveedores/providerSyncHomologador
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export OPENAI_API_KEY="sk-..."
-python3 pipeline.py '{"filePath":"/tmp/catalogo_proveedor.xlsx","enableWebSearch":true}'
+firebase functions:secrets:set OPENAI_API_KEY --project ID_PROYECTO
 ```
 
-## Notas operativas
+## Pruebas
 
-- Si el agente no puede confirmar la equivalencia exacta, dejara `codigoMedicalFiis` en `null`.
-- En casos ambiguos, llenara `codigosCandidatos` y activara `requiereRevisionHumana`.
-- La calidad final depende de contar con un catalogo oficial o maestro de codigos Medical FIIS. Si ese catalogo existe luego, conviene conectarlo como fuente primaria para subir precision.
+```bash
+PYTHONPATH=functions python3 -m unittest discover \
+  -s functions/proveedores/providerSyncHomologador/tests -v
+```
+
+## Validacion manual
+
+Desde la raiz de `AGENTES_MEDI`, valida primero el indice y las categorias del
+Excel. El modo diagnostico agrega candidatos del PDF solo cuando el mejor candidato
+Excel tiene puntaje preliminar menor a `80`, sin consumir OpenAI:
+
+```bash
+PYTHONPATH=functions python3 \
+  functions/proveedores/providerSyncHomologador/run_manual_cases.py \
+  --mode index
+```
+
+Ejecuta el pipeline completo con OpenAI:
+
+```bash
+export OPENAI_API_KEY="..."
+PYTHONPATH=functions python3 \
+  functions/proveedores/providerSyncHomologador/run_manual_cases.py \
+  --mode direct
+```
+
+Para usar un payload propio agrega `--payload /ruta/request.json`.
+
+## Emulador Firebase
+
+```bash
+python3.13 -m venv functions/venv
+source functions/venv/bin/activate
+python -m pip install -r functions/requirements.txt
+export OPENAI_API_KEY="..."
+firebase emulators:start --only functions --project demo-agentes-medi
+```
+
+En otra terminal:
+
+```bash
+source functions/venv/bin/activate
+PYTHONPATH=functions python3 \
+  functions/proveedores/providerSyncHomologador/run_manual_cases.py \
+  --mode http
+```
