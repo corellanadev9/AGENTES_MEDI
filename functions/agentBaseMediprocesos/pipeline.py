@@ -23,7 +23,7 @@ MODEL_NAME = "gpt-5.6-luna"
 
 
 def build_client() -> OpenAI:
-    api_key = "OPENAI_API_KEY_REMOVED"
+    api_key = ""
     if not api_key:
         raise RuntimeError("No se encontró OPENAI_API_KEY en variables de entorno.")
     return OpenAI(api_key=api_key)
