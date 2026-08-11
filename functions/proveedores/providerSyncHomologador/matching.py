@@ -26,9 +26,23 @@ PHRASE_ALIASES = {
     "PROYECCION": "VIEW",
     "VISTAS": "VIEWS",
     "VISTA": "VIEW",
+    "USG": "ULTRASOUND",
+    "US": "ULTRASOUND",
+    "ULTRASONOGRAFIA": "ULTRASOUND",
+    "ULTRASONIDOS": "ULTRASOUND",
     "ULTRASONIDO": "ULTRASOUND",
+    "ECOGRAFIA": "ULTRASOUND",
+    "TAC": "COMPUTED TOMOGRAPHY",
+    "TC": "COMPUTED TOMOGRAPHY",
     "TOMOGRAFIA": "COMPUTED TOMOGRAPHY",
+    "RMN": "MAGNETIC RESONANCE",
+    "RM": "MAGNETIC RESONANCE",
+    "IRM": "MAGNETIC RESONANCE",
+    "RESONANCIAS": "MAGNETIC RESONANCE",
     "RESONANCIA MAGNETICA": "MAGNETIC RESONANCE",
+    "ECG": "ELECTROCARDIOGRAM",
+    "EKG": "ELECTROCARDIOGRAM",
+    "EEG": "ELECTROENCEPHALOGRAM",
     "ELECTROCARDIOGRAMA": "ELECTROCARDIOGRAM",
     "CORTISOL TOTAL": "CORTISOL TOTAL",
 }
@@ -97,7 +111,20 @@ class TextCandidateIndex:
     def __init__(self, records: Iterable[SearchRecord]):
         self.records = list(records)
         self.normalized_names = [normalize_text(record.nombre) for record in self.records]
-        self.tokens = [searchable_tokens(record.nombre) for record in self.records]
+        self.tokens = [
+            searchable_tokens(
+                " ".join(
+                    value
+                    for value in (
+                        record.nombre,
+                        record.tipo_procedimiento,
+                        record.categoria,
+                    )
+                    if value
+                )
+            )
+            for record in self.records
+        ]
         self.token_index: dict[str, set[int]] = {}
         self.code_index: dict[str, int] = {}
 

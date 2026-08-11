@@ -7,6 +7,7 @@ import re
 import sys
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -52,6 +53,29 @@ MODEL_NAME = os.getenv("PROVIDER_SYNC_HOMOLOGADOR_MODEL", "gpt-5.6-luna")
 SUPPORTED_FILE_SUFFIXES = {".xlsx", ".xlsm", ".csv", ".tsv", ".txt"}
 REQUIRED_COLUMNS = {"codigoServicio", "nombreServicio"}
 PDF_FALLBACK_CONFIDENCE = 80
+MIN_RESPONSE_CANDIDATE_SCORE = 45
+MAX_RESPONSE_CANDIDATES = 5
+
+
+def bounded_environment_integer(
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        configured = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, configured))
+
+
+MAX_BATCH_CONCURRENCY = bounded_environment_integer(
+    "PROVIDER_SYNC_HOMOLOGADOR_MAX_CONCURRENCY",
+    default=3,
+    minimum=1,
+    maximum=5,
+)
 
 HEADER_ALIASES = {
     "ROW NUMBER": "rowNumber",
@@ -404,7 +428,7 @@ def run_agent_for_batch(
 
     request_args: dict[str, Any] = {
         "model": MODEL_NAME,
-        "reasoning": {"effort": "medium"},
+        "reasoning": {"effort": "high"},
         "input": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": rendered_prompt},
@@ -436,12 +460,72 @@ def run_agent_for_batch(
                     }
                 )
         normalized_item["traduccionesMedicalFees"] = safe_translations
+        try:
+            confidence_percentage = int(
+                float(str(normalized_item.get("confianzaPorcentaje", 0)).strip())
+            )
+        except (TypeError, ValueError):
+            confidence_percentage = 0
+        confidence_percentage = max(0, min(100, confidence_percentage))
+        normalized_item["confianzaPorcentaje"] = confidence_percentage
+        normalized_item["confianza"] = confidence_label(confidence_percentage)
+        normalized_item["requiereRevisionHumana"] = confidence_percentage < 80
         # Los candidatos verificados se agregan localmente; nunca se confia en los
         # candidatos que el modelo pueda reformatear o inventar.
         normalized_item["codigosCandidatos"] = []
         items.append(HomologatedItem.model_validate(normalized_item))
     total_tokens = getattr(getattr(response, "usage", None), "total_tokens", None)
     return items, total_tokens, candidate_map
+
+
+def run_agent_batches(
+    rows: list[ServiceRow],
+    batch_size: int,
+    context: dict[str, Any],
+    cpt_index: TextCandidateIndex,
+    medical_fees_excel_index: TextCandidateIndex,
+    medical_fees_pdf_index: Optional[TextCandidateIndex],
+    max_candidates: int,
+    client: Any,
+    enable_web_search: bool,
+) -> tuple[list[HomologatedItem], int, dict[int, list[dict[str, Any]]]]:
+    batches = batch_rows(rows, batch_size)
+    raw_items: list[HomologatedItem] = []
+    candidates_by_row: dict[int, list[dict[str, Any]]] = {}
+    total_tokens = 0
+
+    def process_batch(
+        batch: list[ServiceRow],
+    ) -> tuple[list[HomologatedItem], Optional[int], dict[int, list[dict[str, Any]]]]:
+        return run_agent_for_batch(
+            batch=batch,
+            context=context,
+            cpt_index=cpt_index,
+            medical_fees_excel_index=medical_fees_excel_index,
+            medical_fees_pdf_index=medical_fees_pdf_index,
+            max_candidates=max_candidates,
+            client=client,
+            enable_web_search=enable_web_search,
+        )
+
+    worker_count = min(MAX_BATCH_CONCURRENCY, len(batches))
+    if worker_count <= 1:
+        batch_results = (process_batch(batch) for batch in batches)
+        for items, batch_tokens, candidate_map in batch_results:
+            raw_items.extend(items)
+            candidates_by_row.update(candidate_map)
+            total_tokens += batch_tokens or 0
+        return raw_items, total_tokens, candidates_by_row
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(process_batch, batch) for batch in batches]
+        for future in as_completed(futures):
+            items, batch_tokens, candidate_map = future.result()
+            raw_items.extend(items)
+            candidates_by_row.update(candidate_map)
+            total_tokens += batch_tokens or 0
+
+    return raw_items, total_tokens, candidates_by_row
 
 
 def confidence_label(percentage: int) -> str:
@@ -465,6 +549,19 @@ def candidate_models(
     translations: Optional[dict[str, str]] = None,
 ) -> list[CandidateCode]:
     translated_names = translations or {}
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if int(candidate.get("scorePreliminar") or 0)
+        >= MIN_RESPONSE_CANDIDATE_SCORE
+    ]
+    eligible_candidates.sort(
+        key=lambda candidate: (
+            -int(candidate.get("scorePreliminar") or 0),
+            0 if candidate.get("fuente") == "catalogo_cpt" else 1,
+            str(candidate.get("codigo") or ""),
+        )
+    )
     return [
         CandidateCode(
             fuente=candidate["fuente"],
@@ -489,7 +586,7 @@ def candidate_models(
                 f"{candidate.get('scorePreliminar', 0)}%."
             ),
         )
-        for candidate in candidates
+        for candidate in eligible_candidates[:MAX_RESPONSE_CANDIDATES]
     ]
 
 
@@ -741,25 +838,17 @@ def process_request_payload(
         None,
         "excel_primero",
     )
-    initial_raw_items: list[HomologatedItem] = []
-    initial_candidates: dict[int, list[dict[str, Any]]] = {}
-    total_tokens = 0
-
-    for batch in batch_rows(rows, payload.batchSize):
-        items, batch_tokens, candidate_map = run_agent_for_batch(
-            batch=batch,
-            context=initial_context,
-            cpt_index=cpt_index,
-            medical_fees_excel_index=excel_index,
-            medical_fees_pdf_index=None,
-            max_candidates=payload.maxCandidates,
-            client=client,
-            enable_web_search=payload.enableWebSearch,
-        )
-        initial_raw_items.extend(items)
-        initial_candidates.update(candidate_map)
-        if batch_tokens:
-            total_tokens += batch_tokens
+    initial_raw_items, total_tokens, initial_candidates = run_agent_batches(
+        rows=rows,
+        batch_size=payload.batchSize,
+        context=initial_context,
+        cpt_index=cpt_index,
+        medical_fees_excel_index=excel_index,
+        medical_fees_pdf_index=None,
+        max_candidates=payload.maxCandidates,
+        client=client,
+        enable_web_search=payload.enableWebSearch,
+    )
 
     final_by_row = normalize_stage_results(
         rows,
@@ -782,23 +871,18 @@ def process_request_payload(
             pdf_index,
             "fallback_pdf",
         )
-        fallback_raw_items: list[HomologatedItem] = []
-        fallback_candidates: dict[int, list[dict[str, Any]]] = {}
-        for batch in batch_rows(fallback_rows, payload.batchSize):
-            items, batch_tokens, candidate_map = run_agent_for_batch(
-                batch=batch,
-                context=fallback_context,
-                cpt_index=cpt_index,
-                medical_fees_excel_index=excel_index,
-                medical_fees_pdf_index=pdf_index,
-                max_candidates=payload.maxCandidates,
-                client=client,
-                enable_web_search=payload.enableWebSearch,
-            )
-            fallback_raw_items.extend(items)
-            fallback_candidates.update(candidate_map)
-            if batch_tokens:
-                total_tokens += batch_tokens
+        fallback_raw_items, fallback_tokens, fallback_candidates = run_agent_batches(
+            rows=fallback_rows,
+            batch_size=payload.batchSize,
+            context=fallback_context,
+            cpt_index=cpt_index,
+            medical_fees_excel_index=excel_index,
+            medical_fees_pdf_index=pdf_index,
+            max_candidates=payload.maxCandidates,
+            client=client,
+            enable_web_search=payload.enableWebSearch,
+        )
+        total_tokens += fallback_tokens
 
         retried_by_row = normalize_stage_results(
             fallback_rows,

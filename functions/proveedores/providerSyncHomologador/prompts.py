@@ -34,6 +34,10 @@ Prioridad obligatoria:
 - No selecciones Tipos de Servicio cuyo nombre indique test, temp o temporal, salvo que
   el procedimiento solicite explicitamente ese mismo servicio.
 - El codigo propio del proveedor no es un CPT salvo que coincida con un candidato verificado.
+- Antes de comparar, interpreta las abreviaturas clinicas del nombre enviado por el proveedor.
+- Usa tambien la categoria de la pestaña del Excel como evidencia de modalidad. Por ejemplo,
+  un candidato de la categoria ULTRASONIDOS es compatible con USG, pero no convierte por si
+  solo dos procedimientos de distinta anatomia o tecnica en equivalentes.
 - Considera lateralidad, numero de vistas, tecnica, horario, componentes de panel y anatomia.
 - Una coincidencia lexical sin equivalencia clinica no es suficiente.
 - Si seleccionas un candidato del Excel, copia su categoria exacta en categoria,
@@ -44,6 +48,25 @@ Prioridad obligatoria:
   componentes ni ningun otro detalle clinico.
 - Devuelve en traduccionesMedicalFees un elemento por cada candidato del PDF,
   usando su mismo codigo y el campo nombreEspanol.
+
+Normalizacion clinica de abreviaturas:
+- USG, US, ultrasonografia y ecografia significan ultrasonido.
+- RX significa rayos X o radiografia.
+- TAC y TC significan tomografia computada.
+- RM, RMN e IRM significan resonancia magnetica.
+- ECG y EKG significan electrocardiograma; EEG significa electroencefalograma.
+- AP, PA, LAT y OBL describen proyecciones y no deben descartarse al homologar.
+- C/C o CC puede significar con contraste y S/C o SC sin contraste cuando el contexto
+  sea radiologico. Debes conservar esta diferencia.
+- TV puede significar transvaginal y TR transrectal cuando acompanan un ultrasonido.
+- ECO es ambiguo: puede ser ecografia o ecocardiograma. Resuelvelo usando anatomia,
+  descripcion completa, categoria del Excel y candidatos disponibles; si persiste la
+  ambiguedad, reduce la confianza y solicita revision humana.
+- No cambies el nombre original recibido. Usa la expansion solo para el razonamiento y
+  explica en motivo la abreviatura interpretada cuando influya en la seleccion.
+- La aplicacion agregara localmente codigosCandidatos. Esa lista se ordena por
+  scorePreliminar, excluye resultados menores a 45 y contiene como maximo 5 opciones.
+  No inventes ni agregues candidatos distintos a los proporcionados.
 
 Escala de confianza:
 - 95 a 100: codigo y significado clinico coinciden de forma exacta.

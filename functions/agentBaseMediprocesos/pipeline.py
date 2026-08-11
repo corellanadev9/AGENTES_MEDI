@@ -19,11 +19,11 @@ except ImportError:
     from schemas import AgentData, AgentInput, AgentResponse
 
 
-MODEL_NAME = "gpt-5.4-mini"
+MODEL_NAME = "gpt-5.6-luna"
 
 
 def build_client() -> OpenAI:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = "OPENAI_API_KEY_REMOVED"
     if not api_key:
         raise RuntimeError("No se encontró OPENAI_API_KEY en variables de entorno.")
     return OpenAI(api_key=api_key)

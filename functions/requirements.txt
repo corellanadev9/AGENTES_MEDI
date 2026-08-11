@@ -3,3 +3,4 @@ firebase-functions>=0.4.2
 openai>=1.68.2
 openpyxl>=3.1.5
 pydantic>=2.10.6
+pypdf[crypto]>=6.0.0

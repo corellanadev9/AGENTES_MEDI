@@ -1,10 +1,8 @@
 import json
-import os
-from pathlib import Path
 
 import firebase_admin
-from firebase_admin import credentials, initialize_app
-from firebase_functions import https_fn
+from firebase_admin import initialize_app
+from firebase_functions import https_fn, options
 
 from agentBaseMediprocesos.service import handle_request_payload as agent_base_handler
 from proveedores.providerSyncHomologador.service import (
@@ -12,23 +10,11 @@ from proveedores.providerSyncHomologador.service import (
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_SERVICE_ACCOUNT = BASE_DIR / "script" / "keys" / "firebase-sa.json"
-FIREBASE_SERVICE_ACCOUNT_PATH = Path(
-    os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", str(DEFAULT_SERVICE_ACCOUNT))
-)
-
-
 def initialize_firebase() -> None:
     if firebase_admin._apps:
         return
-
-    if FIREBASE_SERVICE_ACCOUNT_PATH.exists():
-        cred = credentials.Certificate(str(FIREBASE_SERVICE_ACCOUNT_PATH))
-        initialize_app(cred)
-    else:
-        # Permite usar credenciales por defecto del entorno cuando la llave local no exista.
-        initialize_app()
+    # Firebase provee credenciales por defecto durante analisis, emulacion y produccion.
+    initialize_app()
 
 
 initialize_firebase()
@@ -53,7 +39,7 @@ def health_check(req: https_fn.Request) -> https_fn.Response:
     )
 
 
-@https_fn.on_request()
+@https_fn.on_request(secrets=["OPENAI_API_KEY"])
 def agent_base_api(req: https_fn.Request) -> https_fn.Response:
     if req.method != "POST":
         return json_response(
@@ -74,6 +60,14 @@ def agent_base_api(req: https_fn.Request) -> https_fn.Response:
                 "result": result,
             }
         )
+    except ValueError as exc:
+        return json_response(
+            {
+                "ok": False,
+                "error": str(exc),
+            },
+            status=400,
+        )
     except Exception as exc:
         return json_response(
             {
@@ -84,7 +78,7 @@ def agent_base_api(req: https_fn.Request) -> https_fn.Response:
         )
 
 
-@https_fn.on_request()
+@https_fn.on_request(secrets=["OPENAI_API_KEY"])
 def example_agent_router(req: https_fn.Request) -> https_fn.Response:
     if req.method != "POST":
         return json_response(
@@ -122,6 +116,15 @@ def example_agent_router(req: https_fn.Request) -> https_fn.Response:
                 "result": result,
             }
         )
+    except ValueError as exc:
+        return json_response(
+            {
+                "ok": False,
+                "agent": agent_name,
+                "error": str(exc),
+            },
+            status=400,
+        )
     except Exception as exc:
         return json_response(
             {
@@ -133,7 +136,11 @@ def example_agent_router(req: https_fn.Request) -> https_fn.Response:
         )
 
 
-@https_fn.on_request()
+@https_fn.on_request(
+    secrets=["OPENAI_API_KEY"],
+    timeout_sec=300,
+    memory=options.MemoryOption.GB_1,
+)
 def provider_sync_homologador_api(req: https_fn.Request) -> https_fn.Response:
     if req.method != "POST":
         return json_response(
@@ -153,6 +160,14 @@ def provider_sync_homologador_api(req: https_fn.Request) -> https_fn.Response:
                 "agent": "providerSyncHomologador",
                 "result": result,
             }
+        )
+    except ValueError as exc:
+        return json_response(
+            {
+                "ok": False,
+                "error": str(exc),
+            },
+            status=400,
         )
     except Exception as exc:
         return json_response(

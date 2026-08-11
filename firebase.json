@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/firebase/firebase-tools/master/schema/firebase-config.json",
+  "functions": {
+    "source": "functions",
+    "runtime": "python313",
+    "ignore": [
+      ".git",
+      ".runtimeconfig.json",
+      "venv",
+      ".venv",
+      "node_modules",
+      ".pytest_cache",
+      "__pycache__",
+      "*.pyc",
+      "*.egg-info",
+      ".secret.local",
+      ".env.local",
+      "script/keys/*.json",
+      "tests",
+      "firebase-debug.log",
+      "firebase-debug.*.log"
+    ]
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    }
+  }
+}

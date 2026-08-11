@@ -17,6 +17,9 @@ ProviderSync/LabSync.
 7. La respuesta conserva una fila por registro y agrega fuente, categoria, confianza
    y revision humana.
 
+Los lotes de una misma etapa se consultan en paralelo con una concurrencia maxima
+de `3`. El fallback PDF comienza despues de completar y validar la etapa inicial.
+
 La prioridad es:
 
 1. `catalogo_cpt`
@@ -133,6 +136,8 @@ la traduccion al espanol.
 
 Dentro de `codigosCandidatos`, los candidatos de `medical_fees` utilizan `nombre`
 para la traduccion al espanol y `nombreOriginal` para el texto exacto del libro.
+La lista contiene como maximo `5` opciones, ordenadas por `scorePreliminar`, y no
+incluye candidatos con una coincidencia menor a `45`.
 
 ## Excel Medical Fees
 
@@ -163,11 +168,14 @@ se mantiene en memoria y su ruta se puede cambiar con `MEDICAL_FEES_PDF_PATH`.
 ```text
 OPENAI_API_KEY
 PROVIDER_SYNC_HOMOLOGADOR_MODEL
+PROVIDER_SYNC_HOMOLOGADOR_MAX_CONCURRENCY
 MEDICAL_FEES_PDF_PATH
 MEDICAL_FEES_EXCEL_PATH
 ```
 
 `PROVIDER_SYNC_HOMOLOGADOR_MODEL` es opcional.
+`PROVIDER_SYNC_HOMOLOGADOR_MAX_CONCURRENCY` acepta valores de `1` a `5` y utiliza
+`3` por defecto. El valor `1` conserva la ejecucion secuencial.
 
 Para desarrollo local se puede crear `functions/.secret.local` usando
 `functions/.secret.local.example` como referencia. El archivo real esta ignorado

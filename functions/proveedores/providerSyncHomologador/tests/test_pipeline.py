@@ -1,6 +1,9 @@
 import json
+import threading
+import time
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from proveedores.providerSyncHomologador.matching import SearchRecord, TextCandidateIndex
 from proveedores.providerSyncHomologador.medical_fees import parse_medical_fees_page
@@ -8,6 +11,7 @@ from proveedores.providerSyncHomologador.medical_fees_excel import (
     load_medical_fees_excel_records,
 )
 from proveedores.providerSyncHomologador.pipeline import (
+    candidate_models,
     collect_rows,
     load_rows_from_delimited_text,
     process_request_payload,
@@ -103,6 +107,24 @@ class InvalidServiceTypeResponses(FakeResponses):
 class InvalidServiceTypeClient:
     def __init__(self):
         self.responses = InvalidServiceTypeResponses()
+
+
+class InvalidConfidenceLabelResponses(FakeResponses):
+    def create(self, **request_args):
+        response = super().create(**request_args)
+        output = json.loads(response.output_text)
+        output["items"][0]["confianzaPorcentaje"] = 85
+        output["items"][0]["confianza"] = "sin_evidencia"
+        output["items"][0]["requiereRevisionHumana"] = True
+        return SimpleNamespace(
+            output_text=json.dumps(output),
+            usage=response.usage,
+        )
+
+
+class InvalidConfidenceLabelClient:
+    def __init__(self):
+        self.responses = InvalidConfidenceLabelResponses()
 
 
 class MedicalTranslationResponses:
@@ -229,7 +251,193 @@ class ExcelFirstClient:
         self.responses = ExcelFirstResponses(initial_confidence)
 
 
+class ConcurrentResponses:
+    def __init__(self):
+        self.active_calls = 0
+        self.max_active_calls = 0
+        self.lock = threading.Lock()
+
+    def create(self, **request_args):
+        with self.lock:
+            self.active_calls += 1
+            self.max_active_calls = max(
+                self.max_active_calls,
+                self.active_calls,
+            )
+
+        try:
+            time.sleep(0.04)
+            user_prompt = request_args["input"][1]["content"]
+            rows_json = user_prompt.split(
+                "Filas y candidatos verificados:\n",
+                1,
+            )[1].strip()
+            enriched_rows = json.loads(rows_json)
+            items = []
+            for row in enriched_rows:
+                candidate = row["candidatosCatalogoCpt"][0]
+                items.append(
+                    {
+                        "rowNumber": row["rowNumber"],
+                        "codigoServicio": row["codigoServicio"],
+                        "nombreServicioOriginal": row["nombreServicio"],
+                        "estadoAsociacion": "asociado",
+                        "fuenteAsociacion": "catalogo_cpt",
+                        "idCptProduct": candidate["idCptProduct"],
+                        "codigoCpt": candidate["codigo"],
+                        "nombreCpt": candidate["nombre"],
+                        "tipoServicioId": 5,
+                        "tipoServicioNombre": "Rayos X",
+                        "confianzaPorcentaje": 90,
+                        "confianza": "alta",
+                        "requiereRevisionHumana": False,
+                        "motivo": "Coincidencia exacta verificada.",
+                    }
+                )
+            return SimpleNamespace(
+                output_text=json.dumps({"items": items}),
+                usage=SimpleNamespace(total_tokens=10),
+            )
+        finally:
+            with self.lock:
+                self.active_calls -= 1
+
+
+class ConcurrentClient:
+    def __init__(self):
+        self.responses = ConcurrentResponses()
+
+
 class ProviderSyncHomologadorTests(unittest.TestCase):
+    def test_response_candidates_are_limited_and_filtered(self):
+        candidates = [
+            {
+                "fuente": "medical_fees",
+                "codigo": str(70000 + index),
+                "nombre": f"CANDIDATO {index}",
+                "scorePreliminar": score,
+            }
+            for index, score in enumerate([99, 82, 75, 60, 45, 44, 30], start=1)
+        ]
+
+        result = candidate_models(candidates)
+
+        self.assertEqual(len(result), 5)
+        self.assertEqual(
+            [candidate.scorePreliminar for candidate in result],
+            [99, 82, 75, 60, 45],
+        )
+
+    def test_independent_batches_run_with_bounded_concurrency(self):
+        client = ConcurrentClient()
+        rows = [
+            {
+                "rowNumber": index,
+                "codigoServicio": str(70000 + index),
+                "nombreServicio": f"RX ESTUDIO {index}",
+            }
+            for index in range(1, 5)
+        ]
+        catalog = [
+            {
+                "idCptProduct": index,
+                "codigoCpt": str(70000 + index),
+                "nombreCpt": f"RX ESTUDIO {index}",
+                "estado": 1,
+            }
+            for index in range(1, 5)
+        ]
+        payload = {
+            "rows": rows,
+            "catalogoCpt": catalog,
+            "catalogoTiposServicio": [
+                {
+                    "idTipoServicio": 5,
+                    "nombreTipoServicio": "Rayos X",
+                }
+            ],
+            "batchSize": 1,
+        }
+
+        with patch(
+            "proveedores.providerSyncHomologador.pipeline.MAX_BATCH_CONCURRENCY",
+            3,
+        ):
+            response = process_request_payload(
+                payload,
+                client=client,
+                medical_fees_index=TextCandidateIndex([]),
+                medical_fees_excel_index=TextCandidateIndex([]),
+            )
+
+        self.assertGreaterEqual(client.responses.max_active_calls, 2)
+        self.assertLessEqual(client.responses.max_active_calls, 3)
+        self.assertEqual(response.tokensUsados, 40)
+        self.assertEqual(
+            [item.rowNumber for item in response.data.items],
+            [1, 2, 3, 4],
+        )
+
+    def test_usg_uses_excel_category_to_prioritize_ultrasound(self):
+        index = TextCandidateIndex(
+            [
+                SearchRecord(
+                    codigo="93978",
+                    nombre="ESTUDIO DE AORTA ABDOMINAL",
+                    fuente="medical_fees",
+                    categoria="ULTRASONIDOS",
+                ),
+                SearchRecord(
+                    codigo="74175",
+                    nombre="ESTUDIO DE AORTA ABDOMINAL",
+                    fuente="medical_fees",
+                    categoria="TAC",
+                ),
+            ]
+        )
+
+        candidates = index.search("", "USG AORTA ABDOMINAL", limit=2)
+
+        self.assertEqual(candidates[0]["codigo"], "93978")
+        self.assertEqual(candidates[0]["categoria"], "ULTRASONIDOS")
+
+    def test_invalid_confidence_label_is_derived_from_percentage(self):
+        payload = {
+            "rows": [
+                {
+                    "rowNumber": 2,
+                    "codigoServicio": "13.04.13",
+                    "nombreServicio": "MAXILAR INFERIOR O SUPERIOR",
+                }
+            ],
+            "catalogoCpt": [
+                {
+                    "idCptProduct": 99,
+                    "codigoCpt": "70100",
+                    "nombreCpt": "RAYOS X DE MANDIBULA, MENOS DE 4 VISTAS",
+                    "estado": 1,
+                }
+            ],
+            "catalogoTiposServicio": [
+                {
+                    "idTipoServicio": 7,
+                    "nombreTipoServicio": "Rayos X",
+                }
+            ],
+        }
+
+        response = process_request_payload(
+            payload,
+            client=InvalidConfidenceLabelClient(),
+            medical_fees_index=TextCandidateIndex([]),
+            medical_fees_excel_index=TextCandidateIndex([]),
+        )
+        item = response.data.items[0]
+
+        self.assertEqual(item.confianzaPorcentaje, 85)
+        self.assertEqual(item.confianza, "alta")
+        self.assertFalse(item.requiereRevisionHumana)
+
     def test_excel_index_keeps_sheet_as_category(self):
         records = load_medical_fees_excel_records()
         rx_record = next(
