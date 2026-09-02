@@ -6,6 +6,11 @@ from typing import Any, Iterable, Optional
 
 
 PHRASE_ALIASES = {
+    # Alias de laboratorio deliberadamente explicitos. No se aplica stemming
+    # generico porque quitar plurales puede cambiar otros terminos clinicos.
+    "CLORURO CL": "CHLORIDE",
+    "CLORUROS": "CHLORIDE",
+    "CLORURO": "CHLORIDE",
     "RAYOS X": "RADIOLOGIC EXAMINATION",
     "RAYO X": "RADIOLOGIC EXAMINATION",
     "RX": "RADIOLOGIC EXAMINATION",
@@ -103,6 +108,8 @@ class SearchRecord:
     fuente: str
     id_cpt_product: Optional[int | str] = None
     tipo_procedimiento: Optional[str] = None
+    tipo_cpt_id: Optional[int | str] = None
+    tipo_cpt_nombre: Optional[str] = None
     pagina_medical_fees: Optional[int] = None
     categoria: Optional[str] = None
 
@@ -118,6 +125,7 @@ class TextCandidateIndex:
                     for value in (
                         record.nombre,
                         record.tipo_procedimiento,
+                        record.tipo_cpt_nombre,
                         record.categoria,
                     )
                     if value
@@ -180,6 +188,8 @@ class TextCandidateIndex:
                     "codigo": record.codigo,
                     "nombre": record.nombre,
                     "tipoProcedimiento": record.tipo_procedimiento,
+                    "tipoCptId": record.tipo_cpt_id,
+                    "tipoCptNombre": record.tipo_cpt_nombre,
                     "paginaMedicalFees": record.pagina_medical_fees,
                     "categoria": record.categoria,
                     "scorePreliminar": round(score * 100),

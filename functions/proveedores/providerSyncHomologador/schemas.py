@@ -53,6 +53,8 @@ class CptCatalogItem(BaseModel):
     nombreCpt: str = Field(min_length=1)
     tipoProcedimientoId: Optional[int | str] = None
     tipoProcedimientoNombre: Optional[str] = None
+    tipoCptId: Optional[int | str] = None
+    tipoCptNombre: Optional[str] = None
     estado: Optional[int | str] = None
 
     @model_validator(mode="before")
@@ -80,6 +82,19 @@ class CptCatalogItem(BaseModel):
         data.setdefault(
             "tipoProcedimientoNombre",
             first_present(data, "tipoProcedimientoNombre", "procedureType", "tipo"),
+        )
+        data.setdefault(
+            "tipoCptId",
+            first_present(data, "tipoCptId", "idCpt", "cptTypeId"),
+        )
+        data.setdefault(
+            "tipoCptNombre",
+            first_present(
+                data,
+                "tipoCptNombre",
+                "cptTypeName",
+                "clasificacionCpt",
+            ),
         )
         data.setdefault(
             "estado",
@@ -177,6 +192,8 @@ class CandidateCode(BaseModel):
     nombre: str
     nombreOriginal: Optional[str] = None
     tipoProcedimiento: Optional[str] = None
+    tipoCptId: Optional[int | str] = None
+    tipoCptNombre: Optional[str] = None
     paginaMedicalFees: Optional[int] = None
     categoria: Optional[str] = None
     scorePreliminar: Optional[int] = Field(default=None, ge=0, le=100)
@@ -215,6 +232,8 @@ class HomologatedItem(BaseModel):
     codigoMedicalFees: Optional[str] = None
     paginaMedicalFees: Optional[int] = None
     categoria: Optional[str] = None
+    tipoCptId: Optional[int | str] = None
+    tipoCptNombre: Optional[str] = None
     tipoServicioId: Optional[int | str] = None
     tipoServicioNombre: Optional[str] = None
     confianzaPorcentaje: int = Field(ge=0, le=100)
@@ -256,7 +275,7 @@ class AgentResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     modelo: str
-    versionContrato: str = "2.1"
+    versionContrato: str = "2.2"
     tokensUsados: Optional[int] = None
     tiempoRespuestaSegundos: str
     data: AgentData

@@ -50,6 +50,12 @@ except ImportError:
 
 
 MODEL_NAME = os.getenv("PROVIDER_SYNC_HOMOLOGADOR_MODEL", "gpt-5.6-luna")
+OPENAI_SERVICE_TIER = (
+    os.getenv("PROVIDER_SYNC_HOMOLOGADOR_SERVICE_TIER", "priority")
+    .strip()
+    .lower()
+    or "priority"
+)
 SUPPORTED_FILE_SUFFIXES = {".xlsx", ".xlsm", ".csv", ".tsv", ".txt"}
 REQUIRED_COLUMNS = {"codigoServicio", "nombreServicio"}
 PDF_FALLBACK_CONFIDENCE = 80
@@ -284,6 +290,8 @@ def build_cpt_index(payload: AgentInput) -> TextCandidateIndex:
             fuente="catalogo_cpt",
             id_cpt_product=item.idCptProduct,
             tipo_procedimiento=item.tipoProcedimientoNombre,
+            tipo_cpt_id=item.tipoCptId,
+            tipo_cpt_nombre=item.tipoCptNombre,
         )
         for item in payload.catalogoCpt
         if str(item.estado) != "0"
@@ -428,6 +436,7 @@ def run_agent_for_batch(
 
     request_args: dict[str, Any] = {
         "model": MODEL_NAME,
+        "service_tier": OPENAI_SERVICE_TIER,
         "reasoning": {"effort": "high"},
         "input": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -578,6 +587,8 @@ def candidate_models(
                 else None
             ),
             tipoProcedimiento=candidate.get("tipoProcedimiento"),
+            tipoCptId=candidate.get("tipoCptId"),
+            tipoCptNombre=candidate.get("tipoCptNombre"),
             paginaMedicalFees=candidate.get("paginaMedicalFees"),
             categoria=candidate.get("categoria"),
             scorePreliminar=candidate.get("scorePreliminar"),
@@ -696,6 +707,8 @@ def normalize_agent_item(
         updates["idCptProduct"] = selected.get("idCptProduct")
         updates["paginaMedicalFees"] = selected.get("paginaMedicalFees")
         updates["categoria"] = selected.get("categoria")
+        updates["tipoCptId"] = selected.get("tipoCptId")
+        updates["tipoCptNombre"] = selected.get("tipoCptNombre")
         updates["codigoMedicalFees"] = selected["codigo"]
 
         if selected["fuente"] == "catalogo_cpt":
@@ -722,6 +735,8 @@ def normalize_agent_item(
                 "codigoMedicalFees": None,
                 "paginaMedicalFees": None,
                 "categoria": None,
+                "tipoCptId": None,
+                "tipoCptNombre": None,
                 "requiereRevisionHumana": True,
             }
         )

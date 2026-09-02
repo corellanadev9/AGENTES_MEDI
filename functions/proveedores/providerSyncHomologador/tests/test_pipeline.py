@@ -5,11 +5,16 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from proveedores.providerSyncHomologador.matching import SearchRecord, TextCandidateIndex
+from proveedores.providerSyncHomologador.matching import (
+    SearchRecord,
+    TextCandidateIndex,
+    normalize_text,
+)
 from proveedores.providerSyncHomologador.medical_fees import parse_medical_fees_page
 from proveedores.providerSyncHomologador.medical_fees_excel import (
     load_medical_fees_excel_records,
 )
+from proveedores.providerSyncHomologador.prompts import SYSTEM_PROMPT
 from proveedores.providerSyncHomologador.pipeline import (
     candidate_models,
     collect_rows,
@@ -20,7 +25,11 @@ from proveedores.providerSyncHomologador.schemas import AgentInput
 
 
 class FakeResponses:
+    def __init__(self):
+        self.last_request_args = None
+
     def create(self, **request_args):
+        self.last_request_args = request_args
         output = {
             "items": [
                 {
@@ -309,6 +318,53 @@ class ConcurrentClient:
 
 
 class ProviderSyncHomologadorTests(unittest.TestCase):
+    def test_prompt_includes_safe_human_validated_equivalences(self):
+        self.assertIn("proyeccion y vista describen el mismo concepto", SYSTEM_PROMPT)
+        self.assertIn('"minimo 4" no equivale', SYSTEM_PROMPT)
+        self.assertIn("Trifasica y 3 fases son equivalentes", SYSTEM_PROMPT)
+        self.assertIn("derecha e izquierda no son", SYSTEM_PROMPT)
+        self.assertIn("RX, ultrasonido, TAC y resonancia no son", SYSTEM_PROMPT)
+        self.assertIn("cloruro, cloruros y chloride", SYSTEM_PROMPT)
+        self.assertIn("No elimines terminaciones de forma general", SYSTEM_PROMPT)
+
+    def test_projection_and_view_are_equivalent_without_losing_count(self):
+        three_projections = normalize_text(
+            "RAYOS X MANDIBULA 3 PROYECCIONES"
+        )
+        three_views = normalize_text("RAYOS X MANDIBULA 3 VISTAS")
+        four_views = normalize_text("RAYOS X MANDIBULA 4 VISTAS")
+
+        self.assertEqual(three_projections, three_views)
+        self.assertNotEqual(three_views, four_views)
+
+    def test_chloride_singular_plural_and_ion_symbol_are_equivalent(self):
+        chloride = normalize_text("CHLORIDE")
+
+        self.assertEqual(normalize_text("CLORURO"), chloride)
+        self.assertEqual(normalize_text("CLORUROS"), chloride)
+        self.assertEqual(normalize_text("CLORURO CL-"), chloride)
+        self.assertNotEqual(normalize_text("CLORO"), chloride)
+
+        index = TextCandidateIndex(
+            [
+                SearchRecord(
+                    codigo="82435",
+                    nombre="CLORUROS",
+                    fuente="catalogo_cpt",
+                ),
+                SearchRecord(
+                    codigo="82310",
+                    nombre="CALCIO",
+                    fuente="catalogo_cpt",
+                ),
+            ]
+        )
+
+        candidates = index.search("", "CLORURO CL-", limit=2)
+
+        self.assertEqual(candidates[0]["codigo"], "82435")
+        self.assertEqual(candidates[0]["scorePreliminar"], 100)
+
     def test_response_candidates_are_limited_and_filtered(self):
         candidates = [
             {
@@ -400,6 +456,34 @@ class ProviderSyncHomologadorTests(unittest.TestCase):
 
         self.assertEqual(candidates[0]["codigo"], "93978")
         self.assertEqual(candidates[0]["categoria"], "ULTRASONIDOS")
+
+    def test_cpt_type_prioritizes_the_compatible_catalog_candidate(self):
+        index = TextCandidateIndex(
+            [
+                SearchRecord(
+                    codigo="LAB-01",
+                    nombre="PERFIL GENERAL",
+                    fuente="catalogo_cpt",
+                    id_cpt_product=10,
+                    tipo_cpt_id=1,
+                    tipo_cpt_nombre="LABORATORIO",
+                ),
+                SearchRecord(
+                    codigo="HOS-01",
+                    nombre="PERFIL GENERAL",
+                    fuente="catalogo_cpt",
+                    id_cpt_product=20,
+                    tipo_cpt_id=2,
+                    tipo_cpt_nombre="HOSPITALIZACION",
+                ),
+            ]
+        )
+
+        candidates = index.search("", "LABORATORIO PERFIL GENERAL", limit=2)
+
+        self.assertEqual(candidates[0]["idCptProduct"], 10)
+        self.assertEqual(candidates[0]["tipoCptNombre"], "LABORATORIO")
+        self.assertEqual(candidates[1]["tipoCptNombre"], "HOSPITALIZACION")
 
     def test_invalid_confidence_label_is_derived_from_percentage(self):
         payload = {
@@ -533,6 +617,8 @@ class ProviderSyncHomologadorTests(unittest.TestCase):
                     "codigoCpt": "70100",
                     "nombreCpt": "RAYOS X DE MANDIBULA, MENOS DE 4 VISTAS",
                     "tipoProcedimientoNombre": "Radiologia",
+                    "tipoCptId": 12,
+                    "tipoCptNombre": "IMAGENOLOGIA",
                     "estado": 1,
                 }
             ],
@@ -544,9 +630,10 @@ class ProviderSyncHomologadorTests(unittest.TestCase):
             ],
         }
 
+        client = FakeClient()
         response = process_request_payload(
             payload,
-            client=FakeClient(),
+            client=client,
             medical_fees_index=medical_index,
             medical_fees_excel_index=TextCandidateIndex([]),
         )
@@ -556,10 +643,26 @@ class ProviderSyncHomologadorTests(unittest.TestCase):
         self.assertEqual(item.fuenteAsociacion, "catalogo_cpt")
         self.assertEqual(item.idCptProduct, 99)
         self.assertEqual(item.codigoCpt, "70100")
+        self.assertEqual(item.tipoCptId, 12)
+        self.assertEqual(item.tipoCptNombre, "IMAGENOLOGIA")
         self.assertEqual(item.tipoServicioNombre, "Rayos X")
         self.assertEqual(item.confianzaPorcentaje, 93)
         self.assertEqual(item.precio, "Q200,00")
         self.assertEqual(response.data.resumen.itemsAsociadosCatalogo, 1)
+        self.assertEqual(item.codigosCandidatos[0].tipoCptId, 12)
+        self.assertEqual(
+            item.codigosCandidatos[0].tipoCptNombre,
+            "IMAGENOLOGIA",
+        )
+        system_prompt = client.responses.last_request_args["input"][0]["content"]
+        user_prompt = client.responses.last_request_args["input"][1]["content"]
+        self.assertEqual(
+            client.responses.last_request_args["service_tier"],
+            "priority",
+        )
+        self.assertIn("tipoCptNombre", system_prompt)
+        self.assertIn("laboratorio", system_prompt)
+        self.assertIn('"tipoCptNombre": "IMAGENOLOGIA"', user_prompt)
 
     def test_unverified_code_is_rejected_even_with_high_model_confidence(self):
         medical_index = TextCandidateIndex(

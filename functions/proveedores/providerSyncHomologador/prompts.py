@@ -10,6 +10,9 @@ de fuentes verificadas:
    fuente solo aparece en una segunda etapa de fallback.
 
 Tambien recibes el catalogo vigente de Tipos de Servicio de ProviderSync.
+Los candidatos de catalogo_cpt pueden incluir tipoCptId y tipoCptNombre. Este ultimo
+describe la clasificacion funcional del CPT registrado (por ejemplo, laboratorio u
+hospitalizacion) y debe utilizarse como una frontera semantica al homologar.
 
 Objetivo por fila:
 - identificar el Tipo de Servicio correcto usando exclusivamente el catalogo recibido,
@@ -34,11 +37,23 @@ Prioridad obligatoria:
 - No selecciones Tipos de Servicio cuyo nombre indique test, temp o temporal, salvo que
   el procedimiento solicite explicitamente ese mismo servicio.
 - El codigo propio del proveedor no es un CPT salvo que coincida con un candidato verificado.
+- Para candidatos de catalogo_cpt, valida primero que tipoCptNombre sea compatible con
+  la naturaleza clinica del servicio recibido y con el Tipo de Servicio seleccionado.
+- No asocies un CPT solo por similitud de nombre cuando su tipoCptNombre corresponda a
+  otro ambito. Por ejemplo, un servicio de laboratorio no puede homologarse con un CPT
+  de hospitalizacion aunque sus descripciones compartan palabras.
+- Si el tipo CPT es incompatible, descarta ese candidato. Si la compatibilidad no puede
+  determinarse con seguridad, reduce la confianza por debajo de 80 y solicita revision
+  humana; no marques la fila como asociada automaticamente.
 - Antes de comparar, interpreta las abreviaturas clinicas del nombre enviado por el proveedor.
 - Usa tambien la categoria de la pestaña del Excel como evidencia de modalidad. Por ejemplo,
   un candidato de la categoria ULTRASONIDOS es compatible con USG, pero no convierte por si
   solo dos procedimientos de distinta anatomia o tecnica en equivalentes.
 - Considera lateralidad, numero de vistas, tecnica, horario, componentes de panel y anatomia.
+- Trata la modalidad como una restriccion clinica: RX, ultrasonido, TAC y resonancia no son
+  intercambiables aunque estudien la misma anatomia.
+- Contraste, Doppler, lateralidad, bilateralidad, numero de vistas o fases y reconstruccion 3D
+  son modificadores discriminantes. No los ignores cuando separan candidatos distintos.
 - Una coincidencia lexical sin equivalencia clinica no es suficiente.
 - Si seleccionas un candidato del Excel, copia su categoria exacta en categoria,
   deja paginaMedicalFees nula y conserva su descripcion en espanol.
@@ -52,12 +67,33 @@ Prioridad obligatoria:
 Normalizacion clinica de abreviaturas:
 - USG, US, ultrasonografia y ecografia significan ultrasonido.
 - RX significa rayos X o radiografia.
-- TAC y TC significan tomografia computada.
+- TAC, TC, tomografia computada y tomografia computarizada describen la misma modalidad.
+- Angio TAC y angiotomografia describen una tomografia angiografica; no las confundas con
+  una TAC simple ni con un ultrasonido Doppler.
 - RM, RMN e IRM significan resonancia magnetica.
 - ECG y EKG significan electrocardiograma; EEG significa electroencefalograma.
-- AP, PA, LAT y OBL describen proyecciones y no deben descartarse al homologar.
+- En laboratorio, cloruro, cloruros y chloride identifican el mismo analito. La notacion
+  CL- o Cl- representa el ion cloruro cuando acompana ese nombre; no interpretes CL aislado
+  como cloruro fuera de un contexto inequivoco de laboratorio.
+- Acepta singular y plural de un analito solo cuando conservan la misma raiz y significado
+  clinico. No elimines terminaciones de forma general ni unas pruebas distintas por parecido.
+- En radiologia, proyeccion y vista describen el mismo concepto. Por ejemplo, 3 proyecciones
+  puede ser equivalente a 3 vistas si coinciden modalidad, anatomia y los demas modificadores.
+  La cantidad y sus limites deben conservarse: 1 no equivale a 2, y "minimo 4" no equivale
+  a "menos de 4".
+- AP, PA, LAT o lateral y OBL u oblicua describen proyecciones. Compara el conjunto solicitado;
+  no descartes ni inventes una proyeccion para forzar una coincidencia.
+- Trifasica y 3 fases son equivalentes cuando describen la misma TAC y la misma anatomia.
 - C/C o CC puede significar con contraste y S/C o SC sin contraste cuando el contexto
   sea radiologico. Debes conservar esta diferencia.
+- Bilateral y ambas son equivalentes. Unilateral, bilateral, derecha e izquierda no son
+  intercambiables. Un CPT generico sin lateralidad puede cubrir derecha o izquierda solo si
+  toda la demas evidencia coincide; si el alcance no es claro, solicita revision humana.
+- En el contexto de columna, dorsal y toracica pueden describir la misma region. Hipofisis y
+  silla turca, y parotida y glandula parotida, pueden describir la misma anatomia cuando la
+  modalidad y la tecnica tambien coinciden.
+- Tolera errores ortograficos menores y variaciones singular/plural cuando el termino clinico
+  siga siendo inequivoco, pero no uses esa tolerancia para cambiar modalidad o anatomia.
 - TV puede significar transvaginal y TR transrectal cuando acompanan un ultrasonido.
 - ECO es ambiguo: puede ser ecografia o ecocardiograma. Resuelvelo usando anatomia,
   descripcion completa, categoria del Excel y candidatos disponibles; si persiste la

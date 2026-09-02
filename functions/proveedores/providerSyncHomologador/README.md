@@ -61,6 +61,8 @@ Metodo: `POST`
       "nombreCpt": "RAYOS X DE MANDIBULA, MENOS DE 4 VISTAS",
       "tipoProcedimientoId": 4,
       "tipoProcedimientoNombre": "Radiologia",
+      "tipoCptId": 2,
+      "tipoCptNombre": "IMAGENOLOGIA",
       "estado": 1
     }
   ],
@@ -83,6 +85,12 @@ alternas. Los formatos soportados son `.xlsx`, `.xlsm`, `.csv`, `.tsv` y `.txt`.
 El catalogo `catalogoTiposServicio` acepta tanto el contrato del API
 (`idTipoServicio`, `nombreTipoServicio`) como las columnas directas de base de datos
 (`ID_SERVICE_TYPE`, `DESCRIPTION`).
+
+Para los CPT registrados, `tipoCptId` y `tipoCptNombre` identifican la
+clasificacion de `CPT_PRODUCT.ID_CPT`. El homologador incorpora el nombre del tipo
+en la recuperacion de candidatos y exige compatibilidad semantica con el servicio
+recibido. Una semejanza lexical no habilita asociaciones entre ambitos distintos,
+como laboratorio y hospitalizacion.
 
 Encabezados reconocidos incluyen:
 
@@ -111,6 +119,8 @@ Encabezados reconocidos incluyen:
   "nombreCptOriginal": "Radiologic examination, mandible; partial, less than 4 views",
   "codigoMedicalFees": "70100",
   "categoria": "RX",
+  "tipoCptId": 2,
+  "tipoCptNombre": "IMAGENOLOGIA",
   "tipoServicioId": 7,
   "tipoServicioNombre": "Rayos X",
   "confianzaPorcentaje": 93,
@@ -168,12 +178,17 @@ se mantiene en memoria y su ruta se puede cambiar con `MEDICAL_FEES_PDF_PATH`.
 ```text
 OPENAI_API_KEY
 PROVIDER_SYNC_HOMOLOGADOR_MODEL
+PROVIDER_SYNC_HOMOLOGADOR_SERVICE_TIER
 PROVIDER_SYNC_HOMOLOGADOR_MAX_CONCURRENCY
 MEDICAL_FEES_PDF_PATH
 MEDICAL_FEES_EXCEL_PATH
 ```
 
 `PROVIDER_SYNC_HOMOLOGADOR_MODEL` es opcional.
+`PROVIDER_SYNC_HOMOLOGADOR_SERVICE_TIER` utiliza `priority` por defecto para
+reducir la latencia de las llamadas a OpenAI. Puede cambiarse a `auto` o
+`default` si el proyecto asociado a la API key no debe utilizar procesamiento
+prioritario.
 `PROVIDER_SYNC_HOMOLOGADOR_MAX_CONCURRENCY` acepta valores de `1` a `5` y utiliza
 `3` por defecto. El valor `1` conserva la ejecucion secuencial.
 

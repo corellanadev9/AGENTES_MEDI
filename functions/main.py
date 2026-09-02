@@ -8,6 +8,9 @@ from agentBaseMediprocesos.service import handle_request_payload as agent_base_h
 from proveedores.providerSyncHomologador.service import (
     handle_request_payload as provider_sync_homologador_handler,
 )
+from proveedores.providerSyncDoctorPlusPrices.service import (
+    handle_request_payload as provider_sync_doctor_plus_prices_handler,
+)
 
 
 def initialize_firebase() -> None:
@@ -95,6 +98,7 @@ def example_agent_router(req: https_fn.Request) -> https_fn.Response:
     handlers = {
         "agentBaseMediprocesos": agent_base_handler,
         "providerSyncHomologador": provider_sync_homologador_handler,
+        "providerSyncDoctorPlusPrices": provider_sync_doctor_plus_prices_handler,
     }
 
     if agent_name not in handlers:
@@ -158,6 +162,49 @@ def provider_sync_homologador_api(req: https_fn.Request) -> https_fn.Response:
             {
                 "ok": True,
                 "agent": "providerSyncHomologador",
+                "result": result,
+            }
+        )
+    except ValueError as exc:
+        return json_response(
+            {
+                "ok": False,
+                "error": str(exc),
+            },
+            status=400,
+        )
+    except Exception as exc:
+        return json_response(
+            {
+                "ok": False,
+                "error": str(exc),
+            },
+            status=500,
+        )
+
+
+@https_fn.on_request(
+    secrets=["OPENAI_API_KEY"],
+    timeout_sec=300,
+    memory=options.MemoryOption.GB_1,
+)
+def provider_sync_doctor_plus_prices_api(req: https_fn.Request) -> https_fn.Response:
+    if req.method != "POST":
+        return json_response(
+            {
+                "ok": False,
+                "error": "Method not allowed. Usa POST.",
+            },
+            status=405,
+        )
+
+    try:
+        payload = req.get_json(silent=True) or {}
+        result = provider_sync_doctor_plus_prices_handler(payload)
+        return json_response(
+            {
+                "ok": True,
+                "agent": "providerSyncDoctorPlusPrices",
                 "result": result,
             }
         )
