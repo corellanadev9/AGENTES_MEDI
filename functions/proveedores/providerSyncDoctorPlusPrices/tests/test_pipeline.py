@@ -43,6 +43,7 @@ class DoctorPlusPriceAgentTests(unittest.TestCase):
                         "rowNumber": 1,
                         "estadoAsociacion": "asociado",
                         "codigoProviderSync": "70100",
+                        "servicePsDescription": "texto libre del modelo que debe ignorarse",
                         "confianzaPorcentaje": 94,
                         "motivo": "Anatomia y modalidad compatibles.",
                     }
@@ -65,7 +66,20 @@ class DoctorPlusPriceAgentTests(unittest.TestCase):
         item = response.data.items[0]
         self.assertEqual(item.estadoAsociacion, "asociado")
         self.assertEqual(item.codigoProviderSync, "70100")
+        self.assertEqual(
+            item.servicePsDescription,
+            "Radiologic examination, mandible; partial, less than 4 views",
+        )
+        self.assertEqual(item.servicePsDescription, item.nombreMedicalFees)
         self.assertFalse(item.requiereRevisionHumana)
+
+        serialized_item = response.model_dump(mode="json", exclude_none=True)[
+            "data"
+        ]["items"][0]
+        self.assertEqual(
+            serialized_item["servicePsDescription"],
+            "Radiologic examination, mandible; partial, less than 4 views",
+        )
 
     def test_rejects_code_not_present_in_verified_candidates(self):
         client = FakeClient(
@@ -94,8 +108,15 @@ class DoctorPlusPriceAgentTests(unittest.TestCase):
             client=client,
             medical_fees_excel_index=self.index,
         )
-        self.assertEqual(response.data.items[0].estadoAsociacion, "sin_asociacion")
-        self.assertIsNone(response.data.items[0].codigoProviderSync)
+        item = response.data.items[0]
+        self.assertEqual(item.estadoAsociacion, "sin_asociacion")
+        self.assertIsNone(item.codigoProviderSync)
+        self.assertIsNone(item.servicePsDescription)
+
+        serialized_item = response.model_dump(mode="json", exclude_none=True)[
+            "data"
+        ]["items"][0]
+        self.assertNotIn("servicePsDescription", serialized_item)
 
     def test_limits_request_to_two_hundred_rows(self):
         with self.assertRaises(ValueError):

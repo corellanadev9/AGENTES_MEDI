@@ -60,6 +60,7 @@ class DoctorPlusHomologatedItem(BaseModel):
     estadoAsociacion: Literal["asociado", "sin_asociacion"]
     codigoProviderSync: Optional[str] = None
     nombreMedicalFees: Optional[str] = None
+    servicePsDescription: Optional[str] = None
     categoriaMedicalFees: Optional[str] = None
     confianzaPorcentaje: int = Field(ge=0, le=100)
     requiereRevisionHumana: bool
