@@ -120,13 +120,15 @@ def normalize_item(
             candidates,
             str(raw_item.get("motivo") or "No se encontro una coincidencia verificada."),
         )
+    selected_description = str(selected["nombre"])
     return DoctorPlusHomologatedItem(
         rowNumber=row.rowNumber,
         codigoServicioOmega=row.codigoServicio,
         nombreServicioOriginal=row.nombreServicio,
         estadoAsociacion="asociado",
         codigoProviderSync=str(selected["codigo"]),
-        nombreMedicalFees=str(selected["nombre"]),
+        nombreMedicalFees=selected_description,
+        servicePsDescription=selected_description,
         categoriaMedicalFees=selected.get("categoria"),
         confianzaPorcentaje=confidence,
         requiereRevisionHumana=confidence < 80,

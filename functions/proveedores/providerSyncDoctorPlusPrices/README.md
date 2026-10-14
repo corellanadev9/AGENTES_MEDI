@@ -34,3 +34,9 @@ Metodo `POST`:
 
 `codigoServicio` es el codigo Omega. La respuesta `codigoProviderSync` es el
 codigo Medical Fees que ProviderSync guarda en `SERVICE_PS_CODE`.
+
+Cuando una fila queda asociada, el item de respuesta tambien incluye
+`servicePsDescription`, tomado del nombre exacto del candidato Medical Fees
+verificado. Ese valor tambien se devuelve como `nombreMedicalFees`, por
+compatibilidad. Si no hay una asociacion verificada, `servicePsDescription` se
+omite de la respuesta; ProviderSync debe guardar ese campo como `NULL`.
