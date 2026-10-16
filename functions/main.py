@@ -5,6 +5,7 @@ from firebase_admin import initialize_app
 from firebase_functions import https_fn, options
 
 from agentBaseMediprocesos.service import handle_request_payload as agent_base_handler
+from agentAuditoriaMedica.service import handle_request_payload as auditoria_medica_handler
 from proveedores.providerSyncHomologador.service import (
     handle_request_payload as provider_sync_homologador_handler,
 )
@@ -224,3 +225,25 @@ def provider_sync_doctor_plus_prices_api(req: https_fn.Request) -> https_fn.Resp
             },
             status=500,
         )
+
+
+@https_fn.on_request(
+    invoker="public",
+    timeout_sec=300,
+    memory=options.MemoryOption.GB_1,
+)
+def auditoria_medica_api(req: https_fn.Request) -> https_fn.Response:
+    if req.method != "POST":
+        return json_response({"ok": False, "error": "Method not allowed. Usa POST."}, status=405)
+
+    payload = req.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return json_response({"ok": False, "error": "Se requiere un objeto JSON."}, status=400)
+    try:
+        result = auditoria_medica_handler(payload)
+        return json_response({"ok": True, "agent": "agentAuditoriaMedica", "result": result})
+    except ValueError as exc:
+        return json_response({"ok": False, "error": str(exc)}, status=400)
+    except Exception:
+        # No exponer detalles de la API ni contenido clínico en errores públicos.
+        return json_response({"ok": False, "error": "No fue posible completar la auditoría."}, status=502)

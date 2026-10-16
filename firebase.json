@@ -15,6 +15,8 @@
       "*.egg-info",
       ".secret.local",
       ".env.local",
+      ".env.edge-001",
+      "agentAuditoriaMedica/.env",
       "script/keys/*.json",
       "tests",
       "firebase-debug.log",

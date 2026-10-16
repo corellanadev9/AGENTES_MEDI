@@ -19,3 +19,11 @@ Todo agente nuevo de Mediprocesos que se cree a partir de ahora debe vivir dentr
 
 - `main.py`
   Ejemplo base de Firebase Functions para publicar un agente como API HTTP.
+
+## Auditoría médica
+
+- `agentAuditoriaMedica/`
+  Revisa pertinencia clínica de medicamentos, laboratorios y procedimientos con
+  búsqueda de fuentes médicas. Usa una proyección de datos clínicos y entrega
+  hallazgos JSON para revisión humana. Consulte su `README.md` para contrato,
+  seguridad y despliegue del endpoint `auditoria_medica_api`.
